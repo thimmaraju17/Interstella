@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>KesVi Universe Visual</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background: #160016;
+      width: 100vw;
+      height: 100vh;
+    }
+    #word {
+      position: absolute;
+      top: 5vh;
+      left: 0;
+      width: 100vw;
+      text-align: center;
+      font-family: 'Megrim', cursive;
+      font-size: 14vw;
+      color: #fc0;
+      -webkit-text-stroke: 0.15vw #c0f;
+      z-index: 2;
+      pointer-events: none;
+      user-select: none;
+      letter-spacing: 0.09em;
+      transition: opacity 1.5s ease;
+    }
+    #controls {
+      position: absolute;
+      bottom: 20px;
+      right: 20px;
+      z-index: 10;
+      background: rgba(32,0,32,0.5);
+      border-radius: 10px;
+      padding: 15px;
+    }
+    #startBtn {
+      padding: 10px 20px;
+      font-size: 1vw;
+      background: #222;
+      color: #fff;
+      border: 1px solid #fff;
+      border-radius: 5px;
+      margin-right: 12px;
+      cursor: pointer;
+    }
+    #speedSlider {
+      vertical-align: middle;
+      width: 80px;
+    }
+    #fadeOverlay {
+      position: absolute;
+      width: 100%;
+      height: 100%;
+      background: black;
+      opacity: 0;
+      transition: opacity 1s;
+      z-index: 5;
+      pointer-events: none;
+    }
+  </style>
+  <link href="https://fonts.googleapis.com/css2?family=Megrim&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div id="word">KesVi</div>
+  <div id="controls">
+    <button id="startBtn">Start Exercise</button>
+    <label for="speedSlider">Speed:</label>
+    <input type="range" id="speedSlider" min="0.5" max="2" step="0.1" value="1">
+  </div>
+  <div id="fadeOverlay"></div>
+  <audio id="bgAudio" autoplay loop>
+    <source src="https://cdn.pixabay.com/audio/2021/09/06/audio_5b2cb48669.mp3" type="audio/mpeg">
+  </audio>
+
+  <script type="module">
+import * as THREE from "https://cdn.skypack.dev/three@0.136.0";
+import { OrbitControls } from "https://cdn.skypack.dev/three@0.136.0/examples/jsm/controls/OrbitControls.js";
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x160016);
+
+const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.1, 2000);
+camera.position.set(0, 0, 80);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(innerWidth, innerHeight);
+document.body.appendChild(renderer.domElement);
+
+window.addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.enablePan = false;
+
+const starGeometry = new THREE.BufferGeometry();
+const starMaterial = new THREE.PointsMaterial({ color: 0x8888ff, size: 0.4 });
+const starVertices = [];
+for (let i = 0; i < 20000; i++) {
+  starVertices.push((Math.random() - 0.5) * 2000);
+  starVertices.push((Math.random() - 0.5) * 2000);
+  starVertices.push((Math.random() - 0.5) * 2000);
+}
+starGeometry.setAttribute("position", new THREE.Float32BufferAttribute(starVertices, 3));
+const stars = new THREE.Points(starGeometry, starMaterial);
+scene.add(stars);
+
+const clock = new THREE.Clock();
+const gu = { time: { value: 0 } };
+const PI2 = Math.PI * 2;
+
+function createGalaxy() {
+  const pts = [], sizes = [], shift = [];
+  for (let i = 0; i < 150000; i++) {
+    let r = 10, R = 80;
+    let rand = Math.pow(Math.random(), 1.5);
+    let radius = Math.sqrt(R * R * rand + (1 - rand) * r * r);
+    pts.push(new THREE.Vector3().setFromCylindricalCoords(radius, Math.random() * PI2, (Math.random() - 0.5) * 3));
+    sizes.push(Math.random() * 1.2 + 0.4);
+    shift.push(
+      Math.random() * Math.PI,
+      Math.random() * PI2,
+      (Math.random() * 0.6 + 0.05),
+      Math.random() * 0.6 + 0.1
+    );
+  }
+  const geo = new THREE.BufferGeometry().setFromPoints(pts);
+  geo.setAttribute("sizes", new THREE.Float32BufferAttribute(sizes, 1));
+  geo.setAttribute("shift", new THREE.Float32BufferAttribute(shift, 4));
+
+  const mat = new THREE.PointsMaterial({
+    size: 0.11,
+    transparent: true,
+    depthTest: false,
+    blending: THREE.AdditiveBlending,
+    onBeforeCompile: shader => {
+      shader.uniforms.time = gu.time;
+      shader.vertexShader = `
+        uniform float time;
+        attribute float sizes;
+        attribute vec4 shift;
+        varying vec3 vColor;
+        ${shader.vertexShader}
+      `.replace(
+        `gl_PointSize = size;`,
+        `gl_PointSize = size * sizes;`
+      ).replace(
+        `#include <color_vertex>`,
+        `#include <color_vertex>
+          float d = length(abs(position) / vec3(80., 10., 80));
+          d = clamp(d, 0., 1.);
+          vColor = mix(vec3(190., 90., 255.), vec3(100., 220., 255.), d) / 255.;
+        `
+      ).replace(
+        `#include <begin_vertex>`,
+        `#include <begin_vertex>
+          float moveT = mod(shift.x + shift.z * time, PI2);
+          float moveS = mod(shift.y + shift.z * time, PI2);
+          transformed += vec3(cos(moveS) * sin(moveT), cos(moveT), sin(moveS) * sin(moveT)) * shift.a;
+        `
+      );
+      shader.fragmentShader = `
+        varying vec3 vColor;
+        ${shader.fragmentShader}
+      `.replace(
+        `vec4 diffuseColor = vec4( diffuse, opacity );`,
+        `float d = length(gl_PointCoord.xy - 0.5);
+         vec4 diffuseColor = vec4( vColor, smoothstep(0.5, 0.1, d));`
+      );
+    }
+  });
+  return new THREE.Points(geo, mat);
+}
+scene.add(createGalaxy());
+
+function createSaturn() {
+  const pts = [], sizes = [], shift = [];
+  for (let i = 0; i < 80000; i++) {
+    pts.push(new THREE.Vector3().randomDirection().multiplyScalar(6));
+    sizes.push(Math.random() * 0.65 + 0.15);
+    shift.push(Math.random(), Math.random(), 0.05 + Math.random() * 0.3, 0.05 + Math.random() * 0.3);
+  }
+  for (let i = 0; i < 100000; i++) {
+    const radius = Math.random() * 4 + 7;
+    const angle = Math.random() * PI2;
+    pts.push(new THREE.Vector3(radius * Math.cos(angle), (Math.random() - 0.5) * 0.08, radius * Math.sin(angle)));
+    sizes.push(Math.random() * 0.45 + 0.09);
+    shift.push(Math.random(), Math.random(), 0.05 + Math.random() * 0.2, 0.05 + Math.random() * 0.2);
+  }
+  const geo = new THREE.BufferGeometry().setFromPoints(pts);
+  geo.setAttribute("sizes", new THREE.Float32BufferAttribute(sizes, 1));
+  geo.setAttribute("shift", new THREE.Float32BufferAttribute(shift, 4));
+  const mat = new THREE.PointsMaterial({
+    size: 0.1,
+    transparent: true,
+    depthTest: false,
+    blending: THREE.AdditiveBlending,
+    onBeforeCompile: shader => {
+      shader.uniforms.time = gu.time;
+      shader.vertexShader = `
+        uniform float time;
+        attribute float sizes;
+        attribute vec4 shift;
+        varying vec3 vColor;
+        ${shader.vertexShader}
+      `.replace(
+        `gl_PointSize = size;`,
+        `gl_PointSize = size * sizes;`
+      ).replace(
+        `#include <color_vertex>`,
+        `#include <color_vertex>
+          float r = length(position.xz);
+          float d = smoothstep(6.2, 11.2, r);
+          vec3 ringColorA = vec3(160., 120., 255.) / 255.;
+          vec3 ringColorB = vec3(120., 220., 255.) / 255.;
+          vColor = mix(mix(ringColorA, ringColorB, 0.3), ringColorA, d*0.7+0.2);
+        `
+      ).replace(
+        `#include <begin_vertex>`,
+        `#include <begin_vertex>
+          float moveT = mod(shift.x + shift.z * time, PI2);
+          float moveS = mod(shift.y + shift.z * time, PI2);
+          transformed += vec3(cos(moveS) * sin(moveT), cos(moveT), sin(moveS) * sin(moveT)) * shift.a;
+        `
+      );
+      shader.fragmentShader = `
+        varying vec3 vColor;
+        ${shader.fragmentShader}
+      `.replace(
+        `vec4 diffuseColor = vec4( diffuse, opacity );`,
+        `float d = length(gl_PointCoord.xy - 0.5);
+         vec4 diffuseColor = vec4( vColor, smoothstep(0.5, 0.1, d));`
+      );
+    }
+  });
+  return new THREE.Points(geo, mat);
+}
+const saturn = createSaturn();
+scene.add(saturn);
+
+// Zoom target positions
+const zoomAngles = [
+  new THREE.Vector3(0, 0, 0),
+  new THREE.Vector3(10, 10, 0),
+  new THREE.Vector3(-10, 5, 0),
+  new THREE.Vector3(0, -15, 0),
+  new THREE.Vector3(15, 0, 0),
+  new THREE.Vector3(-20, 10, 0)
+];
+
+let inExercise = false;
+let speedFactor = 1;
+let exercisePhase = 'zoomIn';
+let currentAngle = 0;
+let exerciseCycles = 0;
+const maxCycles = 3;
+
+let userInteracted = false;
+document.addEventListener("pointerdown", () => userInteracted = true, { passive: true });
+
+const wordEl = document.getElementById("word");
+const startBtn = document.getElementById("startBtn");
+const speedSlider = document.getElementById("speedSlider");
+
+startBtn.onclick = () => {
+  inExercise = !inExercise;
+  startBtn.textContent = inExercise ? "Stop Exercise" : "Start Exercise";
+  if (inExercise) {
+    wordEl.style.opacity = "0";
+    exerciseCycles = 0;
+    exercisePhase = 'zoomIn';
+    currentAngle = Math.floor(Math.random() * zoomAngles.length);
+    camera.position.set(0, 0, 80);
+    controls.target.copy(zoomAngles[currentAngle]);
+    controls.update();
+    const bgAudio = document.getElementById("bgAudio");
+    if (bgAudio.paused) bgAudio.play();
+  } else {
+    setTimeout(() => wordEl.style.opacity = "1", 15000);
+  }
+};
+
+speedSlider.oninput = (e) => {
+  speedFactor = parseFloat(e.target.value);
+};
+
+function fadeInOut(callback) {
+  const fade = document.getElementById("fadeOverlay");
+  fade.style.opacity = 1;
+  setTimeout(() => {
+    callback();
+    fade.style.opacity = 0;
+  }, 1000);
+}
+
+
+function nextCycle() {
+  currentAngle = Math.floor(Math.random() * zoomAngles.length);
+  controls.target.copy(zoomAngles[currentAngle]);
+}
+
+let idleAngle = 0;
+
+function animate() {
+  const elapsedTime = clock.getElapsedTime() * 0.6;
+  gu.time.value = elapsedTime * Math.PI;
+  scene.rotation.y = elapsedTime * 0.015;
+
+  if (inExercise) {
+    const desiredPos = zoomAngles[currentAngle].clone().add(new THREE.Vector3(0, 0, 13));
+    if (exercisePhase === 'zoomIn') {
+      camera.position.lerp(desiredPos, 0.02 * speedFactor);
+      controls.target.lerp(zoomAngles[currentAngle], 0.02 * speedFactor);
+      if (camera.position.distanceTo(desiredPos) < 0.4) {
+        camera.position.copy(desiredPos);
+        exercisePhase = 'zoomOut';
+      }
+    } else {
+      const farPos = new THREE.Vector3(0, 0, 80);
+      // Zoom out only if user NOT interacting or exercise mode is on
+      if (!userInteracted || inExercise) {
+        camera.position.lerp(farPos, 0.0051 * speedFactor);
+        controls.target.lerp(new THREE.Vector3(0, 0, 0), 0.0051 * speedFactor);
+        if (camera.position.distanceTo(farPos) < 0.5) {
+          camera.position.copy(farPos);
+          exerciseCycles++;
+          if (exerciseCycles >= maxCycles) {
+            inExercise = false;
+            startBtn.textContent = "Start Exercise";
+            setTimeout(() => wordEl.style.opacity = "1", 15000);
+            userInteracted = false; // Reset interaction flag after exercise ends
+          } else {
+            exercisePhase = 'zoomIn';
+            fadeInOut(nextCycle);
+          }
+        }
+      }
+      // Else user interacting and exercise off, hold zoom, do nothing
+    }
+  } else {
+    if (!userInteracted) {
+      idleAngle += 0.0007 * speedFactor;
+      const radius = 80;
+      const idlePos = new THREE.Vector3(
+        Math.sin(idleAngle) * radius,
+        12 * Math.sin(idleAngle * 0.3),
+        Math.cos(idleAngle) * radius
+      );
+      camera.position.lerp(idlePos, 0.005);
+      controls.target.lerp(new THREE.Vector3(0, 0, 0), 0.005);
+    }
+  }
+
+  controls.update();
+  renderer.render(scene, camera);
+  requestAnimationFrame(animate);
+}
+
+animate();
+  </script>
+</body>
+</html>
